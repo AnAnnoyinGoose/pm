@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +11,7 @@
 #define MAX_COMMAND_LENGTH 512
 
 static char rsync_path[MAX_PATH_LENGTH];
-struct stat st = {0};
+static struct stat st = {0};
 
 struct ProjectInfo {
   char name[MAX_PATH_LENGTH];
@@ -32,14 +31,12 @@ static const char *args[][4] = {
 };
 
 FILE *open_file(const char *filename);
-
 void help();
 void new_project(const char *folder_name, const char *description);
 void open_project(const char *folder_name);
 void set_rsync_path();
 void rsync_folder(const char *folder_name);
 int match_args(char *argv[]);
-
 void remove_project(const char *folder_name);
 void list_projects();
 
@@ -58,7 +55,7 @@ int main(int argc, char *argv[]) {
     } else if (argc == 4) {
       new_project(argv[2], argv[3]);
     } else {
-      printf("Invalid number of arguments for 'new' command.\n");
+      fprintf(stderr, "Invalid number of arguments for 'new' command.\n");
     }
     break;
   case 1: // rsync
@@ -86,9 +83,11 @@ int main(int argc, char *argv[]) {
 }
 
 void help() {
-  printf("Usage: \n");
+  printf("\033[1;36mUsage:\033[0m \n");
   for (size_t i = 0; i < sizeof(args) / sizeof(args[0]); i++) {
-    printf("\t%s [%s] %s %s\n", args[i][0], args[i][1], args[i][2], args[i][3]);
+    printf("\033[1m\t%s\033[0m [\033[1;34m%s\033[0m] \033[1;32m%s\033[0m "
+           "\033[1m%s\033[0m\n",
+           args[i][0], args[i][1], args[i][2], args[i][3]);
   }
 }
 
@@ -99,7 +98,7 @@ void new_project(const char *folder_name, const char *description) {
 
   while (fscanf(file, "%s", path) != EOF) {
     if (strcmp(path, folder_name) == 0) {
-      printf("Project already exists\n");
+      printf("\033[1;31mProject already exists\033[0m\n");
       fclose(file);
       return;
     }
@@ -111,115 +110,19 @@ void new_project(const char *folder_name, const char *description) {
   if (stat(folder_name, &st) == -1)
     mkdir(folder_name, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
-  // Record timestamp and description
   struct ProjectInfo project;
   strncpy(project.name, folder_name, sizeof(project.name));
-  project.last_rsync_time = time(NULL); // Get current timestamp
+  project.last_rsync_time = time(NULL);
   strncpy(project.description, description, sizeof(project.description));
 
-  // Append project info to a binary file
   sprintf(path, "%s/%s.dat", getenv("HOME"), PROJECT_LIST_FILE);
   FILE *bin_file = fopen(path, "ab");
   if (bin_file != NULL) {
     fwrite(&project, sizeof(struct ProjectInfo), 1, bin_file);
     fclose(bin_file);
   }
-}
 
-void set_rsync_path() {
-  char path[MAX_PATH_LENGTH];
-  sprintf(path, "%s/%s", getenv("HOME"), PROJECT_LIST_FILE);
-  FILE *file = open_file(path);
-  fscanf(file, "%s", rsync_path+strlen("RSYNC_DEST="));
-  fclose(file);
-}
-
-void rsync_folder(const char *folder_name) {
-  char path[MAX_PATH_LENGTH];
-  sprintf(path, "%s/%s", getenv("HOME"), PROJECT_LIST_FILE);
-  FILE *file = open_file(path);
-
-  while (fscanf(file, "%s", path) != EOF) {
-    if (folder_name == NULL || strcmp(path, folder_name) == 0) {
-      printf("Syncing %s\n", path);
-      char command[MAX_COMMAND_LENGTH];
-      sprintf(command, "rsync -azh --filter=':- .gitignore'  %s %s", path,
-              rsync_path);
-      system(command);
-    }
-  }
-
-  fclose(file);
-}
-
-void remove_project(const char *folder_name) {
-  char path[MAX_PATH_LENGTH];
-  sprintf(path, "%s/%s.dat", getenv("HOME"), PROJECT_LIST_FILE);
-  FILE *bin_file = open_file(path);
-
-  struct ProjectInfo project_list[MAX_PATH_LENGTH];
-  int num_projects = 0;
-
-  // Read project information from the binary file
-  while (fread(&project_list[num_projects], sizeof(struct ProjectInfo), 1,
-               bin_file) == 1) {
-    num_projects++;
-  }
-  fclose(bin_file);
-
-  int removed = 0;
-
-  for (int i = 0; i < num_projects; i++) {
-    if (strcmp(project_list[i].name, folder_name) == 0) {
-      removed = 1;
-
-      // Shift remaining projects to fill the gap
-      for (int j = i; j < num_projects - 1; j++) {
-        project_list[j] = project_list[j + 1];
-      }
-
-      num_projects--;
-
-      break;
-    }
-  }
-
-  if (removed) {
-    // Write the updated project list back to the binary file
-    FILE *bin_file = fopen(path, "wb");
-    if (bin_file != NULL) {
-      for (int i = 0; i < num_projects; i++) {
-        fwrite(&project_list[i], sizeof(struct ProjectInfo), 1, bin_file);
-      }
-      fclose(bin_file);
-    }
-
-    printf("Project '%s' removed successfully.\n", folder_name);
-  } else {
-    printf("Project '%s' not found in the list.\n", folder_name);
-  }
-}
-
-void list_projects() {
-  char path[MAX_PATH_LENGTH];
-  sprintf(path, "%s/%s.dat", getenv("HOME"), PROJECT_LIST_FILE);
-  FILE *bin_file = open_file(path);
-
-  printf("\033[1m%-20s\t\033[1;36m%-20s\t%-20s\033[0m\n", "Project Name",
-         "Timestamp", "Description");
-
-  if (bin_file != NULL) {
-    struct ProjectInfo project;
-    while (fread(&project, sizeof(struct ProjectInfo), 1, bin_file) == 1) {
-      struct tm *tm_info = localtime(&project.last_rsync_time);
-      char timestamp[MAX_PATH_LENGTH];
-      strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
-
-      printf("\033[1m%-20s\t\033[0m%-20s\t%-20s\n", project.name, timestamp,
-             project.description);
-    }
-    fclose(bin_file);
-  }
+  printf("\033[1;32mProject '%s' created successfully\033[0m\n", folder_name);
 }
 
 void open_project(const char *folder_name) {
@@ -234,7 +137,6 @@ void open_project(const char *folder_name) {
   struct ProjectInfo project_list[MAX_PATH_LENGTH];
   int num_projects = 0;
 
-  // Read project information from the binary file
   while (fread(&project_list[num_projects], sizeof(struct ProjectInfo), 1,
                bin_file) == 1) {
     num_projects++;
@@ -280,7 +182,99 @@ void open_project(const char *folder_name) {
   }
 
   if (!found) {
-    printf("Project '%s' not found in the list.\n", folder_name);
+    printf("\033[1;31mProject '%s' not found in the list\033[0m\n",
+           folder_name);
+  }
+}
+
+void set_rsync_path() {
+  char path[MAX_PATH_LENGTH];
+  sprintf(path, "%s/%s", getenv("HOME"), PROJECT_LIST_FILE);
+  FILE *file = open_file(path);
+  fscanf(file, "%s", rsync_path + strlen("RSYNC_DEST="));
+  fclose(file);
+}
+
+void rsync_folder(const char *folder_name) {
+  char path[MAX_PATH_LENGTH];
+  sprintf(path, "%s/%s", getenv("HOME"), PROJECT_LIST_FILE);
+  FILE *file = open_file(path);
+
+  while (fscanf(file, "%s", path) != EOF) {
+    if (folder_name == NULL || strcmp(path, folder_name) == 0) {
+      printf("Syncing %s\n", path);
+      char command[MAX_COMMAND_LENGTH];
+      sprintf(command, "rsync -a --filter=':- .gitignore'  %s %s >> /dev/null 2>&1", path,
+              rsync_path);
+      system(command);
+    }
+  }
+
+  fclose(file);
+}
+
+void remove_project(const char *folder_name) {
+  char path[MAX_PATH_LENGTH];
+  sprintf(path, "%s/%s.dat", getenv("HOME"), PROJECT_LIST_FILE);
+  FILE *bin_file = open_file(path);
+
+  struct ProjectInfo project_list[MAX_PATH_LENGTH];
+  int num_projects = 0;
+
+  while (fread(&project_list[num_projects], sizeof(struct ProjectInfo), 1,
+               bin_file) == 1) {
+    num_projects++;
+  }
+  fclose(bin_file);
+
+  int removed = 0;
+
+  for (int i = 0; i < num_projects; i++) {
+    if (strcmp(project_list[i].name, folder_name) == 0) {
+      removed = 1;
+      for (int j = i; j < num_projects - 1; j++) {
+        project_list[j] = project_list[j + 1];
+      }
+      num_projects--;
+      break;
+    }
+  }
+
+  if (removed) {
+    FILE *bin_file = fopen(path, "wb");
+    if (bin_file != NULL) {
+      for (int i = 0; i < num_projects; i++) {
+        fwrite(&project_list[i], sizeof(struct ProjectInfo), 1, bin_file);
+      }
+      fclose(bin_file);
+    }
+
+    printf("\033[1;32mProject '%s' removed successfully\033[0m\n", folder_name);
+  } else {
+    printf("\033[1;31mProject '%s' not found in the list\033[0m\n",
+           folder_name);
+  }
+}
+
+void list_projects() {
+  char path[MAX_PATH_LENGTH];
+  sprintf(path, "%s/%s.dat", getenv("HOME"), PROJECT_LIST_FILE);
+  FILE *bin_file = open_file(path);
+
+  printf("\033[1;36m%-20s\t\033[1;36m%-20s\t%-20s\033[0m\n", "Project Name",
+         "Timestamp", "Description");
+
+  if (bin_file != NULL) {
+    struct ProjectInfo project;
+    while (fread(&project, sizeof(struct ProjectInfo), 1, bin_file) == 1) {
+      struct tm *tm_info = localtime(&project.last_rsync_time);
+      char timestamp[MAX_PATH_LENGTH];
+      strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
+
+      printf("\033[1m%-20s\t\033[0m%-20s\t%-20s\n", project.name, timestamp,
+             project.description);
+    }
+    fclose(bin_file);
   }
 }
 
@@ -296,7 +290,7 @@ int match_args(char *argv[]) {
 FILE *open_file(const char *filename) {
   FILE *file = fopen(filename, "a+");
   if (file == NULL) {
-    printf("File %s does not exist\n", filename);
+    fprintf(stderr, "File %s does not exist\n", filename);
     exit(1);
   }
   return file;

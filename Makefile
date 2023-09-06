@@ -13,3 +13,4 @@ $(TARGET): $(FILES)
 
 clean:
 	rm -f $(TARGET)
+	rm -f ~/.local/bin/$(TARGET)
